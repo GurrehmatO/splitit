@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dynamic Expense Splitter</title>
+    <style>
+        :root {
+            --primary: #4f81bd;
+            --secondary: #9bbb59;
+            --bg-total: #dce6f1;
+            --bg-paid: #f2dcdb;
+            --border-color: #d9d9d9;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 20px;
+            background-color: #f8f9fa;
+            color: #333;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: #fff;
+            padding: 25px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        }
+        h2 { margin-top: 0; color: #222; }
+        .config-section {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 25px;
+            background: #f1f3f5;
+            padding: 15px;
+            border-radius: 6px;
+            align-items: flex-end;
+            flex-wrap: wrap;
+        }
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        label { font-size: 13px; font-weight: 600; color: #495057; }
+        input, button {
+            padding: 8px 12px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        button {
+            background-color: #212529;
+            color: white;
+            border: none;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        button:hover { background-color: #424649; }
+        
+        .table-container {
+            overflow-x: auto;
+            margin-bottom: 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+            text-align: left;
+        }
+        th, td {
+            padding: 8px 10px;
+            border: 1px solid var(--border-color);
+        }
+        th { background-color: #e9edf4; font-weight: bold; }
+        .super-header {
+            text-align: center;
+            color: white;
+            font-weight: bold;
+        }
+        .shares-header { background-color: var(--primary); }
+        .split-header { background-color: var(--secondary); }
+        
+        table input {
+            width: 100%;
+            box-sizing: border-box;
+            border: 1px transparent;
+            background: transparent;
+            padding: 4px;
+            text-align: inherit;
+        }
+        table input:focus {
+            background: #fff;
+            border-color: #80bdff;
+            outline: none;
+        }
+        .text-right { text-align: right; }
+        
+        .row-total { background-color: var(--bg-total); font-weight: bold; }
+        .row-paid { background-color: var(--bg-paid); font-weight: bold; border-bottom: 3px double #000; }
+        
+        .btn-danger { background-color: #dc3545; }
+        .btn-danger:hover { background-color: #bb2d3b; }
+        .btn-success { background-color: #198754; }
+        .btn-success:hover { background-color: #157347; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Splitit: G's Bill & Expense Splitter</h2>
+    
+    <div class="config-section">
+        <div class="form-group">
+            <label for="peopleNames">People Names (Comma separated)</label>
+            <input type="text" id="peopleNames" placeholder="e.g. g, kanav, sukh" style="width: 300px;">
+        </div>
+        <button onclick="initializeTable()">Setup Table</button>
+        <button class="btn-success" onclick="addRow()">+ Add Item Row</button>
+    </div>
+
+    <div class="table-container">
+        <table id="splitterTable">
+            <thead>
+                </thead>
+            <tbody id="itemRows">
+                </tbody>
+            <tfoot>
+                </tfoot>
+        </table>
+    </div>
+</div>
+
+<script>
+    // Global State management (starts empty)
+    let people = [];
+    let userHasOverriddenPaid = false;
+
+    function initializeTable() {
+        const nameInput = document.getElementById('peopleNames').value;
+        people = nameInput.split(',').map(name => name.trim()).filter(name => name !== "");
+        
+        if (people.length === 0) {
+            alert("Please enter at least one name to set up the table.");
+            return;
+        }
+
+        userHasOverriddenPaid = false; // Reset override state on a clean table setup
+        renderHeaders();
+        
+        // Start completely clean with one empty item row instead of default arrays
+        const tbody = document.getElementById('itemRows');
+        tbody.innerHTML = '';
+        appendRowData('', 0, {});
+        
+        calculateSplits();
+    }
+
+    function renderHeaders() {
+        const thead = document.querySelector('#splitterTable thead');
+        thead.innerHTML = '';
+
+        if (people.length === 0) return;
+
+        // Row 1: Super headers
+        const row1 = document.createElement('tr');
+        row1.innerHTML = `
+            <th colspan="3"></th>
+            <th class="super-header shares-header" colspan="${people.length}">shares</th>
+            <th class="super-header split-header" colspan="${people.length}">split</th>
+        `;
+        
+        // Row 2: Columns subheadings
+        const row2 = document.createElement('tr');
+        let html = `
+            <th style="width: 50px;">Action</th>
+            <th>item</th>
+            <th class="text-right" style="width: 120px;">cost</th>
+        `;
+        people.forEach(p => html += `<th class="text-right">${p}</th>`);
+        people.forEach(p => html += `<th class="text-right">${p}</th>`);
+        
+        row2.innerHTML = html;
+        thead.appendChild(row1);
+        thead.appendChild(row2);
+    }
+
+    function appendRowData(itemName = '', cost = 0, shares = {}) {
+        const tbody = document.getElementById('itemRows');
+        const tr = document.createElement('tr');
+        tr.className = 'data-row';
+
+        let html = `
+            <td><button class="btn-danger" style="padding: 2px 8px; font-size:12px;" onclick="deleteRow(this)">Delete</button></td>
+            <td><input type="text" class="item-name" placeholder="Item description" value="${itemName}"></td>
+            <td><input type="number" class="item-cost text-right" value="${cost === 0 ? '' : cost}" placeholder="0" oninput="calculateSplits()" step="any"></td>
+        `;
+
+        // Shares Inputs (Defaulting to blank placeholders instead of 0/1)
+        people.forEach(p => {
+            const val = shares[p] !== undefined ? shares[p] : '';
+            html += `<td><input type="number" class="share-input text-right" data-person="${p}" value="${val}" placeholder="0" oninput="calculateSplits()" step="any"></td>`;
+        });
+
+        // Split Outputs
+        people.forEach(p => {
+            html += `<td class="split-output text-right" data-person="${p}">0.00</td>`;
+        });
+
+        tr.innerHTML = html;
+        tbody.appendChild(tr);
+    }
+
+    function addRow() {
+        if (people.length === 0) {
+            alert("Please run 'Setup Table' with people names before adding items.");
+            return;
+        }
+        appendRowData('', 0, {});
+        calculateSplits();
+    }
+
+    function deleteRow(btn) {
+        btn.closest('tr').remove();
+        calculateSplits();
+    }
+
+    function calculateSplits() {
+        if (people.length === 0) return;
+
+        const rows = document.querySelectorAll('#itemRows .data-row');
+        let totalCost = 0;
+        let individualSubtotals = {};
+        
+        people.forEach(p => individualSubtotals[p] = 0);
+
+        // 1. Process item calculations row-by-row
+        rows.forEach(row => {
+            const cost = parseFloat(row.querySelector('.item-cost').value) || 0;
+            totalCost += cost;
+
+            let rowTotalShares = 0;
+            let shareValues = {};
+
+            people.forEach(p => {
+                const shareInput = row.querySelector(`.share-input[data-person="${p}"]`).value;
+                const shareVal = parseFloat(shareInput) || 0;
+                shareValues[p] = shareVal;
+                rowTotalShares += shareVal;
+            });
+
+            people.forEach(p => {
+                const splitCell = row.querySelector(`.split-output[data-person="${p}"]`);
+                let calculatedSplit = 0;
+                if (rowTotalShares > 0) {
+                    calculatedSplit = cost * (shareValues[p] / rowTotalShares);
+                }
+                individualSubtotals[p] += calculatedSplit;
+                splitCell.innerText = calculatedSplit.toFixed(2);
+            });
+        });
+
+        // 2. Refresh Footers
+        renderFooter(totalCost, individualSubtotals);
+    }
+
+    function renderFooter(totalCost, individualSubtotals) {
+        const tfoot = document.querySelector('#splitterTable tfoot');
+        
+        // Explicit Requirement: Keep the "paid" total input field at 0 until explicitly overwritten by the user
+        let currentPaidValue = 0;
+        const oldPaidInput = document.getElementById('actualPaidInput');
+        
+        if (oldPaidInput) {
+            currentPaidValue = parseFloat(oldPaidInput.value);
+            if (isNaN(currentPaidValue)) currentPaidValue = 0;
+        }
+
+        tfoot.innerHTML = '';
+
+        // Row A: Total Row
+        const totalRow = document.createElement('tr');
+        totalRow.className = 'row-total';
+        let totalHtml = `
+            <td></td>
+            <td>total</td>
+            <td class="text-right">${totalCost.toFixed(2)}</td>
+            <td colspan="${people.length}"></td>
+        `;
+        people.forEach(p => {
+            totalHtml += `<td class="text-right">${individualSubtotals[p].toFixed(2)}</td>`;
+        });
+        totalRow.innerHTML = totalHtml;
+
+        // Row B: Paid Row (Starts explicitly at 0)
+        const paidRow = document.createElement('tr');
+        paidRow.className = 'row-paid';
+        let paidHtml = `
+            <td></td>
+            <td>paid</td>
+            <td><input type="number" id="actualPaidInput" class="text-right" style="font-weight:bold;" value="${userHasOverriddenPaid ? currentPaidValue : 0}" oninput="handlePaidInputEvent(${totalCost}, ${JSON.stringify(individualSubtotals).replace(/"/g, '&quot;')})"></td>
+            <td colspan="${people.length}"></td>
+        `;
+        
+        people.forEach(p => {
+            paidHtml += `<td class="text-right scaled-output" data-person="${p}">0.00</td>`;
+        });
+        paidRow.className = 'row-paid';
+        paidRow.innerHTML = paidHtml;
+
+        tfoot.appendChild(totalRow);
+        tfoot.appendChild(paidRow);
+
+        // Run scaling math based on current input value (which is 0 initially)
+        updatePaidScaling(totalCost, individualSubtotals, userHasOverriddenPaid ? currentPaidValue : 0);
+    }
+
+    function handlePaidInputEvent(totalCost, individualSubtotals) {
+        userHasOverriddenPaid = true; // Mark that user has interacted with paid field
+        const rawValue = parseFloat(document.getElementById('actualPaidInput').value) || 0;
+        updatePaidScaling(totalCost, individualSubtotals, rawValue);
+    }
+
+    function updatePaidScaling(totalCost, individualSubtotals, paidAmount) {
+        people.forEach(p => {
+            const scaledCell = document.querySelector(`.scaled-output[data-person="${p}"]`);
+            let scaledSplit = 0;
+            if (totalCost > 0 && paidAmount > 0) {
+                scaledSplit = paidAmount * (individualSubtotals[p] / totalCost);
+            }
+            scaledCell.innerText = scaledSplit.toFixed(2);
+        });
+    }
+</script>
+
+</body>
+</html>
